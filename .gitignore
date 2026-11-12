@@ -1,0 +1,42 @@
+# 密码与密钥（禁止提交）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# 依赖与缓存
+node_modules/
+.pnpm-store/
+vendor/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.gradle/
+target/
+
+# 构建与产物
+dist/
+build/
+out/
+coverage/
+*.log
+
+# 本地数据库与真实用户数据（禁止提交）
+*.sqlite
+*.sqlite3
+*.db
+data/local/
+uploads/
+
+# 临时文件与系统噪音
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
