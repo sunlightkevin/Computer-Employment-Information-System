@@ -5,7 +5,7 @@
 <div class="main main-full">
   <div class="topbar">
     <div class="topbar-in">
-      <a class="back" href="{{ url_for('index', type=job.job_type) }}">
+      <a class="back" id="backToList" href="{{ back_url }}">
         <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>返回列表
       </a>
     </div>
@@ -49,7 +49,7 @@
           <p>无法连接到来源页面。这条岗位可能是原网站已删除、链接已变更，或来源站暂时不可访问。你可以返回列表继续浏览，稍后再试。</p>
           <div class="warn-acts">
             <button type="button" id="retryLink">重新尝试</button>
-            <a class="warn-link" href="{{ url_for('index', type=job.job_type) }}">返回列表</a>
+            <a class="warn-link" id="warnBack" href="{{ back_url }}">返回列表</a>
           </div>
         </div>
 
@@ -65,7 +65,7 @@
           {% else %}
             <span class="btn-hint">没有可用的原文链接</span>
           {% endif %}
-          <a class="btn btn-ghost" href="{{ url_for('index', type=job.job_type) }}">返回列表</a>
+          <a class="btn btn-ghost" id="bottomBack" href="{{ back_url }}">返回列表</a>
           <span class="btn-hint">原文在新标签页打开</span>
         </div>
       </div>
@@ -91,6 +91,25 @@
 
 <script>
 (function () {
+  // 从列表点进来时用 history.back()：筛选条件和滚动位置都由浏览器原生还原。
+  // 直接打开详情页没有上一条记录，就走 href 里那个带了条件的链接。
+  function cameFromList() {
+    var ref = document.referrer;
+    return !!ref && ref.indexOf(location.origin) === 0 && history.length > 1;
+  }
+
+  if (cameFromList()) {
+    ['backToList', 'bottomBack', 'warnBack'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('click', function (event) {
+          event.preventDefault();
+          history.back();
+        });
+      }
+    });
+  }
+
   var btn = document.getElementById('openOrigin');
   var warn = document.getElementById('linkWarn');
   var retry = document.getElementById('retryLink');

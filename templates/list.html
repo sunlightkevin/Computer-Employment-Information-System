@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}{{ category_labels[job_type] }} · 计算机就业信息{% endblock %}
 
+{% macro city_meta(job) -%}
+  {%- if remote_city in job.cities -%}
+    <span class="remote-badge">{{ remote_city }}</span>
+    {%- set rest = job.cities | reject('equalto', remote_city) | list -%}
+    {%- if rest %}<span>{{ rest | join(' / ') }}</span>{% endif -%}
+  {%- else -%}
+    <span>{{ job.cities | join(' / ') if job.cities else '未知' }}</span>
+  {%- endif -%}
+{%- endmacro %}
+
 {% block body %}
 <aside class="sidebar">
   <div class="brand">
@@ -13,29 +23,54 @@
     </div>
   </div>
 
-  <div class="side-scroll">
-    <div class="facet">
-      <div class="facet-head"><div class="facet-title">城市 / 地点</div></div>
-      {% for item in cities %}
-        <div class="opt static">
-          <span class="opt-label">{{ item.value }}</span>
-          <span class="opt-count">{{ item.count }}</span>
+  <form class="side-form" method="get" action="{{ url_for('index') }}" id="filterForm">
+    <input type="hidden" name="type" value="{{ job_type }}">
+    <div class="side-scroll">
+      <div class="facet">
+        <div class="facet-head">
+          <div class="facet-title">城市 / 地点</div>
+          {% if cities %}
+            <a class="facet-clear" href="{{ url_for('index', type=job_type, direction=directions) }}">清除</a>
+          {% endif %}
         </div>
-      {% endfor %}
-    </div>
+        {% for item in city_facets %}
+          <label class="opt">
+            <input type="checkbox" name="city" value="{{ item.value }}"
+                   {% if item.value in cities %}checked{% endif %}>
+            <span class="opt-label">{{ item.value }}</span>
+            <span class="opt-count">{{ item.count }}</span>
+          </label>
+        {% else %}
+          <p class="facet-empty">当前分类下暂无城市数据</p>
+        {% endfor %}
+      </div>
 
-    <div class="facet">
-      <div class="facet-head"><div class="facet-title">专业 / 岗位方向</div></div>
-      {% for item in directions %}
-        <div class="opt static">
-          <span class="opt-label">{{ item.value }}</span>
-          <span class="opt-count">{{ item.count }}</span>
+      <div class="facet">
+        <div class="facet-head">
+          <div class="facet-title">专业 / 岗位方向</div>
+          {% if directions %}
+            <a class="facet-clear" href="{{ url_for('index', type=job_type, city=cities) }}">清除</a>
+          {% endif %}
         </div>
-      {% endfor %}
-    </div>
+        {% for item in direction_facets %}
+          <label class="opt">
+            <input type="checkbox" name="direction" value="{{ item.value }}"
+                   {% if item.value in directions %}checked{% endif %}>
+            <span class="opt-label">{{ item.value }}</span>
+            <span class="opt-count">{{ item.count }}</span>
+          </label>
+        {% else %}
+          <p class="facet-empty">当前分类下暂无方向数据</p>
+        {% endfor %}
+      </div>
 
-    <p class="side-note">筛选条件将在下一阶段接入，当前仅显示库中分布。</p>
-  </div>
+      <noscript>
+        <button class="btn btn-primary side-apply" type="submit">应用筛选</button>
+      </noscript>
+
+      <p class="side-note">同一维度内多选为「或」，城市与方向之间为「且」。</p>
+    </div>
+  </form>
 
   <div class="side-foot">
     <div class="side-meta">
@@ -50,7 +85,8 @@
     <div class="topbar-in">
       <div class="tabs">
         {% for key in category_order %}
-          <a class="tab {% if key == job_type %}active{% endif %}" href="{{ url_for('index', type=key) }}">
+          <a class="tab {% if key == job_type %}active{% endif %}"
+             href="{{ url_for('index', type=key, city=cities, direction=directions) }}">
             {{ category_labels[key] }}<span class="tab-num">{{ counts[key] }}</span>
           </a>
         {% endfor %}
@@ -69,11 +105,24 @@
       <p class="page-sub">
         {% if library_total == 0 %}
           本地库中暂无数据
+        {% elif filters_active %}
+          筛选出 {{ total }} 条 · 当前分类共 {{ counts[job_type] }} 条
         {% else %}
           共 {{ library_total }} 条岗位 · 当前分类 {{ counts[job_type] }} 条
         {% endif %}
       </p>
     </div>
+
+    {% if filters_active %}
+      <div class="filter-bar">
+        <div class="chips">
+          <span class="chips-label">已选</span>
+          {% for value in cities %}<span class="chip">{{ value }}</span>{% endfor %}
+          {% for value in directions %}<span class="chip">{{ value }}</span>{% endfor %}
+        </div>
+        <a class="filter-clear" href="{{ url_for('index', type=job_type) }}">清除筛选</a>
+      </div>
+    {% endif %}
 
     {% if library_total == 0 %}
       <div class="empty">
@@ -81,6 +130,24 @@
         <h3>本地库中还没有岗位</h3>
         <p>先用采集脚本抓一次数据，抓完刷新本页即可看到岗位。采集在命令行运行，界面不提供入口。</p>
         <div class="cmd"><span>$</span>python -m collector --source yingjiesheng</div>
+      </div>
+    {% elif total == 0 and filters_active %}
+      <div class="empty">
+        <div class="empty-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></div>
+        <h3>没有符合当前条件的岗位</h3>
+        <p>
+          「{{ category_labels[job_type] }}」里没有同时满足
+          {% for value in cities %}城市 {{ value }}{% if not loop.last %}、{% endif %}{% endfor %}
+          {%- if cities and directions %} 且 {% endif -%}
+          {% for value in directions %}方向 {{ value }}{% if not loop.last %}、{% endif %}{% endfor %}
+          的岗位。可以减少条件再试。
+        </p>
+        <div class="pager" style="margin-top:0">
+          <a class="btn btn-ghost" href="{{ url_for('index', type=job_type) }}">清除筛选</a>
+          {% for key in category_order if key != job_type and counts[key] > 0 %}
+            <a class="btn btn-ghost" href="{{ url_for('index', type=key) }}">查看{{ category_labels[key] }}（{{ counts[key] }}）</a>
+          {% endfor %}
+        </div>
       </div>
     {% elif total == 0 %}
       <div class="empty">
@@ -100,7 +167,7 @@
       </div>
 
       {% for job in jobs %}
-        <a class="card" href="{{ url_for('detail', job_id=job.id) }}">
+        <a class="card" href="{{ url_for('detail', job_id=job.id, **filters) }}" data-scroll-save>
           <div class="card-main">
             <div class="card-head">
               <span class="card-title">{{ job.title }}</span>
@@ -108,7 +175,7 @@
             </div>
             <div class="card-company">{{ job.company }}</div>
             <div class="card-meta">
-              <span>{{ job.cities | join(' / ') if job.cities else '未知' }}</span>
+              {{ city_meta(job) }}
               <span class="dot"></span>
               <span>{{ job.directions | join(' / ') if job.directions else '其他' }}</span>
             </div>
@@ -123,7 +190,7 @@
       {% if pages > 1 %}
         <nav class="pager">
           {% if page > 1 %}
-            <a href="{{ url_for('index', type=job_type, page=page-1) }}">‹</a>
+            <a href="{{ url_for('index', page=page-1, **filters) }}">‹</a>
           {% else %}
             <span class="pg-disabled">‹</span>
           {% endif %}
@@ -132,12 +199,12 @@
             {% if n == page %}
               <span class="on">{{ n }}</span>
             {% else %}
-              <a href="{{ url_for('index', type=job_type, page=n) }}">{{ n }}</a>
+              <a href="{{ url_for('index', page=n, **filters) }}">{{ n }}</a>
             {% endif %}
           {% endfor %}
 
           {% if page < pages %}
-            <a href="{{ url_for('index', type=job_type, page=page+1) }}">›</a>
+            <a href="{{ url_for('index', page=page+1, **filters) }}">›</a>
           {% else %}
             <span class="pg-disabled">›</span>
           {% endif %}
@@ -146,4 +213,33 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+(function () {
+  var form = document.getElementById('filterForm');
+  if (form) {
+    // 勾选即生效；不依赖 JS 时退化为表单提交按钮（noscript 里的那个）
+    form.addEventListener('change', function (event) {
+      if (event.target && event.target.type === 'checkbox') {
+        sessionStorage.removeItem(scrollKey());
+        form.submit();
+      }
+    });
+  }
+
+  // 从详情返回时把列表停在原来的位置（T3.7）
+  function scrollKey() {
+    return 'list-scroll:' + location.pathname + location.search;
+  }
+
+  var saved = sessionStorage.getItem(scrollKey());
+  if (saved !== null) {
+    window.scrollTo(0, parseInt(saved, 10) || 0);
+  }
+
+  window.addEventListener('scroll', function () {
+    sessionStorage.setItem(scrollKey(), String(window.scrollY));
+  }, { passive: true });
+})();
+</script>
 {% endblock %}

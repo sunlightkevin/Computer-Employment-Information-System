@@ -159,12 +159,43 @@ def distinct_values(conn: sqlite3.Connection, table: str, column: str) -> list[s
     return [r["v"] for r in rows]
 
 
-def value_counts(conn: sqlite3.Connection, table: str, column: str) -> list[dict]:
-    """带数量的可选值，按数量倒序。"""
-    rows = conn.execute(
-        f"SELECT {column} AS value, COUNT(*) AS count FROM {table} GROUP BY {column} ORDER BY count DESC, value"
+FACET_COLUMNS = {"city": ("job_cities", "city"), "direction": ("job_directions", "direction")}
+
+
+def facet_counts(
+    conn: sqlite3.Connection,
+    dimension: str,
+    job_type: str | None = None,
+    cities: list[str] | None = None,
+    directions: list[str] | None = None,
+    keyword: str | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """筛选区的可选值与数量。
+
+    数量按「其他维度的当前条件」统计：选了城市之后，方向上的数字反映的是
+    这些城市里的分布，而不是全库分布。否则会出现「筛完只剩 0 条，选项上
+    却还写着 45」的自相矛盾。
+
+    本维度自己的条件不参与统计，否则勾上之后其余选项会被清零。
+    """
+    if dimension not in FACET_COLUMNS:
+        raise ValueError(f"未知维度：{dimension}")
+    table, column = FACET_COLUMNS[dimension]
+    if dimension == "city":
+        where, params = _where(job_type, [], directions or [], keyword)
+    else:
+        where, params = _where(job_type, cities or [], [], keyword)
+
+    sql = (
+        f"SELECT f.{column} AS value, COUNT(*) AS count "
+        f"FROM {table} f JOIN jobs j ON j.id = f.job_id "
+        f"WHERE {where} GROUP BY f.{column} ORDER BY count DESC, value"
     )
-    return [{"value": r["value"], "count": int(r["count"])} for r in rows]
+    if limit:
+        sql += " LIMIT ?"
+        params = params + [int(limit)]
+    return [{"value": r["value"], "count": int(r["count"])} for r in conn.execute(sql, params)]
 
 
 def mark_source_reachability(conn: sqlite3.Connection, source_id: int, reachable: bool, checked_at: str) -> None:

@@ -17,6 +17,9 @@ PAGE_SIZE = 10
 CATEGORY_LABELS = {"intern": "实习", "campus": "校招", "fulltime": "就业"}
 CATEGORY_ORDER = ("intern", "campus", "fulltime")
 DEFAULT_CATEGORY = "intern"
+# 手改 URL 时允许一次勾很多，但别让查询无限膨胀
+MAX_FILTER_VALUES = 20
+REMOTE_CITY = "远程"
 
 
 def create_app(db_path: str | None = None) -> Flask:
@@ -45,15 +48,22 @@ def create_app(db_path: str | None = None) -> Flask:
         if job_type not in CATEGORY_LABELS:
             job_type = DEFAULT_CATEGORY
 
+        cities = _multi_arg("city")
+        directions = _multi_arg("direction")
         page = _int_arg("page", 1)
 
         db = conn()
         library_total = read.total_jobs(db)
         counts = read.category_counts(db)
-        total = read.count_jobs(db, job_type=job_type)
+        total = read.count_jobs(db, job_type=job_type, cities=cities, directions=directions)
         pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         page = min(max(1, page), pages)
-        jobs = read.list_jobs(db, job_type=job_type, page=page, page_size=PAGE_SIZE)
+        jobs = read.list_jobs(
+            db, job_type=job_type, cities=cities, directions=directions, page=page, page_size=PAGE_SIZE
+        )
+
+        # 当前筛选状态，拼链接时统一从这儿取，避免某个链接漏带条件
+        filters = {"type": job_type, "city": cities, "direction": directions}
 
         return render_template(
             "list.html",
@@ -67,8 +77,13 @@ def create_app(db_path: str | None = None) -> Flask:
             pages=pages,
             page_size=PAGE_SIZE,
             jobs=jobs,
-            cities=read.value_counts(db, "job_cities", "city")[:12],
-            directions=read.value_counts(db, "job_directions", "direction"),
+            filters=filters,
+            cities=cities,
+            directions=directions,
+            filters_active=bool(cities or directions),
+            city_facets=read.facet_counts(db, "city", job_type=job_type, directions=directions),
+            direction_facets=read.facet_counts(db, "direction", job_type=job_type, cities=cities),
+            remote_city=REMOTE_CITY,
         )
 
     @app.route("/job/<int:job_id>")
@@ -78,12 +93,17 @@ def create_app(db_path: str | None = None) -> Flask:
         if job is None:
             return render_template("not_found.html", job_id=job_id), 404
 
+        # 返回列表要回到点进来时的条件，而不是默认首页
+        back = _back_args()
         return render_template(
             "detail.html",
             job=job,
             source=read.primary_source(job),
             category_label=CATEGORY_LABELS.get(job["job_type"], job["job_type"]),
             unreachable=request.args.get("unreachable") == "1",
+            back_url=url_for("index", **back),
+            back_args=back,
+            remote_city=REMOTE_CITY,
         )
 
     @app.post("/job/<int:job_id>/check")
@@ -111,13 +131,13 @@ def create_app(db_path: str | None = None) -> Flask:
 
         source = read.primary_source(job)
         if source is None:
-            return redirect(url_for("detail", job_id=job_id, unreachable=1))
+            return redirect(url_for("detail", job_id=job_id, unreachable=1, **_back_args()))
 
         reachable = linkcheck.is_reachable(source["source_url"], timeout=app.config["LINK_TIMEOUT"])
         read.mark_source_reachability(db, source["id"], reachable, _now())
         if reachable:
             return redirect(source["source_url"])
-        return redirect(url_for("detail", job_id=job_id, unreachable=1))
+        return redirect(url_for("detail", job_id=job_id, unreachable=1, **_back_args()))
 
     return app
 
@@ -127,6 +147,42 @@ def _int_arg(name: str, default: int) -> int:
         return int(request.args.get(name, default))
     except (TypeError, ValueError):
         return default
+
+
+def _multi_arg(name: str) -> list[str]:
+    """多选参数。`?city=北京&city=上海` 和 `?city=北京,上海` 都认。
+
+    同值只留一个：勾选状态下表单重复提交同一个值没有意义。
+    """
+    values: list[str] = []
+    for raw in request.args.getlist(name):
+        for part in str(raw).replace("，", ",").split(","):
+            value = part.strip()
+            if value and value not in values:
+                values.append(value)
+    return values[:MAX_FILTER_VALUES]
+
+
+def _back_args() -> dict:
+    """详情页返回列表时要带上的筛选状态。
+
+    默认值不写进链接，URL 短一点，也避免 `?page=1` 这类噪音。
+    """
+    job_type = request.args.get("type", DEFAULT_CATEGORY)
+    if job_type not in CATEGORY_LABELS:
+        job_type = DEFAULT_CATEGORY
+
+    args: dict = {"type": job_type}
+    cities = _multi_arg("city")
+    directions = _multi_arg("direction")
+    if cities:
+        args["city"] = cities
+    if directions:
+        args["direction"] = directions
+    page = _int_arg("page", 1)
+    if page > 1:
+        args["page"] = page
+    return args
 
 
 def _date_only(value: str | None) -> str:
