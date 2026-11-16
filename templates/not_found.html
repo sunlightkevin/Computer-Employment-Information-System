@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}未找到岗位 · 计算机就业信息{% endblock %}
+
+{% block body %}
+<div class="main main-full">
+  <div class="content">
+    <div class="empty" style="padding-top:96px">
+      <div class="empty-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg></div>
+      <h3>没有找到这条岗位（#{{ job_id }}）</h3>
+      <p>它可能已被删除，或者链接里的编号不正确。可以返回列表重新选择。</p>
+      <a class="btn btn-ghost" href="{{ url_for('index') }}">返回列表</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

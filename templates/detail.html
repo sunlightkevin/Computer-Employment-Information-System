@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title }} · 计算机就业信息{% endblock %}
+
+{% block body %}
+<div class="main main-full">
+  <div class="topbar">
+    <div class="topbar-in">
+      <a class="back" href="{{ url_for('index', type=job.job_type) }}">
+        <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>返回列表
+      </a>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="detail-grid">
+      <div>
+        <h1 class="d-title">{{ job.title }}</h1>
+        <div class="d-company">{{ job.company }}</div>
+
+        <div class="d-tags">
+          <span class="tag tag-{{ job.job_type }}">{{ category_label }}</span>
+          {% for city in job.cities %}<span class="pill">{{ city }}</span>{% endfor %}
+          {% for direction in job.directions %}<span class="pill">{{ direction }}</span>{% endfor %}
+        </div>
+
+        <section class="d-section">
+          <h4>岗位摘要</h4>
+          {% if job.summary %}
+            <div class="d-summary">{{ job.summary }}</div>
+          {% else %}
+            <div class="d-summary muted">来源页面未提供岗位描述，完整内容请查看原文。</div>
+          {% endif %}
+        </section>
+
+        <section class="d-section">
+          <h4>投递方式</h4>
+          {% if job.apply_info %}
+            <div class="d-apply">{{ job.apply_info }}</div>
+          {% else %}
+            <div class="d-apply muted">投递方式见原文 —— 来源页面未单独列出投递入口。</div>
+          {% endif %}
+        </section>
+
+        <div class="warn" id="linkWarn" {% if not unreachable %}hidden{% endif %}>
+          <div class="warn-top">
+            <svg viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+            <b>该岗位原文可能已不存在</b>
+          </div>
+          <p>无法连接到来源页面。这条岗位可能是原网站已删除、链接已变更，或来源站暂时不可访问。你可以返回列表继续浏览，稍后再试。</p>
+          <div class="warn-acts">
+            <button type="button" id="retryLink">重新尝试</button>
+            <a class="warn-link" href="{{ url_for('index', type=job.job_type) }}">返回列表</a>
+          </div>
+        </div>
+
+        <div class="actions">
+          {% if source %}
+            <button class="btn btn-primary" id="openOrigin" data-job="{{ job.id }}">
+              <svg viewBox="0 0 24 24"><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+              查看原文
+            </button>
+            <noscript>
+              <a class="btn btn-primary" href="{{ url_for('go_source', job_id=job.id) }}" target="_blank" rel="noopener">查看原文</a>
+            </noscript>
+          {% else %}
+            <span class="btn-hint">没有可用的原文链接</span>
+          {% endif %}
+          <a class="btn btn-ghost" href="{{ url_for('index', type=job.job_type) }}">返回列表</a>
+          <span class="btn-hint">原文在新标签页打开</span>
+        </div>
+      </div>
+
+      <aside>
+        <div class="aside-card">
+          <h5>来源信息</h5>
+          <dl>
+            <dt>来源站点</dt><dd>{{ source.source_site if source else '—' }}</dd>
+            <dt>原文域名</dt><dd>{{ source.source_url.split('/')[2] if source else '—' }}</dd>
+            <dt>发布时间</dt><dd>{{ job.published_at | date_only }}</dd>
+            <dt>采集时间</dt><dd>{{ job.first_seen_at | date_only }}</dd>
+          </dl>
+        </div>
+        <div class="aside-card">
+          <h5>说明</h5>
+          <p class="aside-note">平台内只保留摘要，不保存原文全文。完整内容与投递入口以来源页面为准。</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var btn = document.getElementById('openOrigin');
+  var warn = document.getElementById('linkWarn');
+  var retry = document.getElementById('retryLink');
+  if (!btn) return;
+
+  var btnLabel = btn.innerHTML;
+
+  function showWarn() { warn.hidden = false; }
+  function hideWarn() { warn.hidden = true; }
+  function busy(on) {
+    btn.disabled = on;
+    btn.textContent = on ? '正在确认原文…' : '';
+    if (!on) btn.innerHTML = btnLabel;
+  }
+
+  async function check() {
+    var jobId = btn.getAttribute('data-job');
+    busy(true);
+    try {
+      var response = await fetch('/job/' + jobId + '/check', { method: 'POST' });
+      var data = await response.json();
+      return data;
+    } catch (error) {
+      return { ok: false };
+    } finally {
+      busy(false);
+    }
+  }
+
+  btn.addEventListener('click', async function () {
+    var data = await check();
+    if (data.ok && data.url) {
+      hideWarn();
+      window.open(data.url, '_blank', 'noopener');
+    } else {
+      showWarn();
+    }
+  });
+
+  if (retry) {
+    retry.addEventListener('click', async function () {
+      var data = await check();
+      if (data.ok && data.url) {
+        hideWarn();
+        window.open(data.url, '_blank', 'noopener');
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

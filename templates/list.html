@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}{{ category_labels[job_type] }} · 计算机就业信息{% endblock %}
+
+{% block body %}
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-mark">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h13"/></svg>
+    </div>
+    <div class="brand-text">
+      <b>计算机就业信息</b>
+      <span>本地聚合 · 个人使用</span>
+    </div>
+  </div>
+
+  <div class="side-scroll">
+    <div class="facet">
+      <div class="facet-head"><div class="facet-title">城市 / 地点</div></div>
+      {% for item in cities %}
+        <div class="opt static">
+          <span class="opt-label">{{ item.value }}</span>
+          <span class="opt-count">{{ item.count }}</span>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="facet">
+      <div class="facet-head"><div class="facet-title">专业 / 岗位方向</div></div>
+      {% for item in directions %}
+        <div class="opt static">
+          <span class="opt-label">{{ item.value }}</span>
+          <span class="opt-count">{{ item.count }}</span>
+        </div>
+      {% endfor %}
+    </div>
+
+    <p class="side-note">筛选条件将在下一阶段接入，当前仅显示库中分布。</p>
+  </div>
+
+  <div class="side-foot">
+    <div class="side-meta">
+      库中岗位 <code>{{ library_total }}</code> 条<br>
+      来源：应届生求职网
+    </div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-in">
+      <div class="tabs">
+        {% for key in category_order %}
+          <a class="tab {% if key == job_type %}active{% endif %}" href="{{ url_for('index', type=key) }}">
+            {{ category_labels[key] }}<span class="tab-num">{{ counts[key] }}</span>
+          </a>
+        {% endfor %}
+      </div>
+      <div class="search" title="关键词搜索为 P1，尚未实现">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="text" placeholder="搜索岗位、企业" disabled>
+        <span class="p1-badge">P1</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="page-head">
+      <h1 class="page-title">{{ category_labels[job_type] }}</h1>
+      <p class="page-sub">
+        {% if library_total == 0 %}
+          本地库中暂无数据
+        {% else %}
+          共 {{ library_total }} 条岗位 · 当前分类 {{ counts[job_type] }} 条
+        {% endif %}
+      </p>
+    </div>
+
+    {% if library_total == 0 %}
+      <div class="empty">
+        <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h18"/></svg></div>
+        <h3>本地库中还没有岗位</h3>
+        <p>先用采集脚本抓一次数据，抓完刷新本页即可看到岗位。采集在命令行运行，界面不提供入口。</p>
+        <div class="cmd"><span>$</span>python -m collector --source yingjiesheng</div>
+      </div>
+    {% elif total == 0 %}
+      <div class="empty">
+        <div class="empty-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></div>
+        <h3>当前分类下没有岗位</h3>
+        <p>「{{ category_labels[job_type] }}」中还没有采集到岗位，可以切换到其他分类查看。</p>
+        <div class="pager" style="margin-top:0">
+          {% for key in category_order if key != job_type and counts[key] > 0 %}
+            <a class="btn btn-ghost" href="{{ url_for('index', type=key) }}">查看{{ category_labels[key] }}（{{ counts[key] }}）</a>
+          {% endfor %}
+        </div>
+      </div>
+    {% else %}
+      <div class="list-bar">
+        <div class="count">筛选结果 <b>{{ total }}</b> 条</div>
+        <div class="sort-note">按发布时间倒序</div>
+      </div>
+
+      {% for job in jobs %}
+        <a class="card" href="{{ url_for('detail', job_id=job.id) }}">
+          <div class="card-main">
+            <div class="card-head">
+              <span class="card-title">{{ job.title }}</span>
+              <span class="tag tag-{{ job.job_type }}">{{ category_labels[job.job_type] }}</span>
+            </div>
+            <div class="card-company">{{ job.company }}</div>
+            <div class="card-meta">
+              <span>{{ job.cities | join(' / ') if job.cities else '未知' }}</span>
+              <span class="dot"></span>
+              <span>{{ job.directions | join(' / ') if job.directions else '其他' }}</span>
+            </div>
+          </div>
+          <div class="card-side">
+            <span class="card-date">{{ job.published_at | date_only }}</span>
+            <span class="card-arrow"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+          </div>
+        </a>
+      {% endfor %}
+
+      {% if pages > 1 %}
+        <nav class="pager">
+          {% if page > 1 %}
+            <a href="{{ url_for('index', type=job_type, page=page-1) }}">‹</a>
+          {% else %}
+            <span class="pg-disabled">‹</span>
+          {% endif %}
+
+          {% for n in range(1, pages + 1) %}
+            {% if n == page %}
+              <span class="on">{{ n }}</span>
+            {% else %}
+              <a href="{{ url_for('index', type=job_type, page=n) }}">{{ n }}</a>
+            {% endif %}
+          {% endfor %}
+
+          {% if page < pages %}
+            <a href="{{ url_for('index', type=job_type, page=page+1) }}">›</a>
+          {% else %}
+            <span class="pg-disabled">›</span>
+          {% endif %}
+        </nav>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
