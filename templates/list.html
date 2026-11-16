@@ -30,7 +30,7 @@
         <div class="facet-head">
           <div class="facet-title">城市 / 地点</div>
           {% if cities %}
-            <a class="facet-clear" href="{{ url_for('index', type=job_type, direction=directions) }}">清除</a>
+            <a class="facet-clear" href="{{ url_for('index', type=job_type, direction=directions, q=keyword or None) }}">清除</a>
           {% endif %}
         </div>
         {% for item in city_facets %}
@@ -49,7 +49,7 @@
         <div class="facet-head">
           <div class="facet-title">专业 / 岗位方向</div>
           {% if directions %}
-            <a class="facet-clear" href="{{ url_for('index', type=job_type, city=cities) }}">清除</a>
+            <a class="facet-clear" href="{{ url_for('index', type=job_type, city=cities, q=keyword or None) }}">清除</a>
           {% endif %}
         </div>
         {% for item in direction_facets %}
@@ -86,16 +86,22 @@
       <div class="tabs">
         {% for key in category_order %}
           <a class="tab {% if key == job_type %}active{% endif %}"
-             href="{{ url_for('index', type=key, city=cities, direction=directions) }}">
+             href="{{ url_for('index', type=key, city=cities, direction=directions, q=keyword or None) }}">
             {{ category_labels[key] }}<span class="tab-num">{{ counts[key] }}</span>
           </a>
         {% endfor %}
       </div>
-      <div class="search" title="关键词搜索为 P1，尚未实现">
+      <form class="search" method="get" action="{{ url_for('index') }}" role="search">
+        <input type="hidden" name="type" value="{{ job_type }}">
+        {% for value in cities %}<input type="hidden" name="city" value="{{ value }}">{% endfor %}
+        {% for value in directions %}<input type="hidden" name="direction" value="{{ value }}">{% endfor %}
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-        <input type="text" placeholder="搜索岗位、企业" disabled>
-        <span class="p1-badge">P1</span>
-      </div>
+        <input type="text" name="q" value="{{ keyword }}" placeholder="搜索岗位、企业、方向" aria-label="关键词搜索">
+        {% if keyword %}
+          <a class="search-clear" title="清除关键词"
+             href="{{ url_for('index', type=job_type, city=cities, direction=directions) }}">×</a>
+        {% endif %}
+      </form>
     </div>
   </div>
 
@@ -117,6 +123,7 @@
       <div class="filter-bar">
         <div class="chips">
           <span class="chips-label">已选</span>
+          {% if keyword %}<span class="chip chip-keyword">“{{ keyword }}”</span>{% endif %}
           {% for value in cities %}<span class="chip">{{ value }}</span>{% endfor %}
           {% for value in directions %}<span class="chip">{{ value }}</span>{% endfor %}
         </div>
@@ -132,15 +139,16 @@
         <div class="cmd"><span>$</span>python -m collector --source yingjiesheng</div>
       </div>
     {% elif total == 0 and filters_active %}
+      {% set conditions = [] %}
+      {% if keyword %}{% set _ = conditions.append('关键词「' ~ keyword ~ '」') %}{% endif %}
+      {% if cities %}{% set _ = conditions.append('城市 ' ~ (cities | join('、'))) %}{% endif %}
+      {% if directions %}{% set _ = conditions.append('方向 ' ~ (directions | join('、'))) %}{% endif %}
       <div class="empty">
         <div class="empty-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></div>
         <h3>没有符合当前条件的岗位</h3>
         <p>
           「{{ category_labels[job_type] }}」里没有同时满足
-          {% for value in cities %}城市 {{ value }}{% if not loop.last %}、{% endif %}{% endfor %}
-          {%- if cities and directions %} 且 {% endif -%}
-          {% for value in directions %}方向 {{ value }}{% if not loop.last %}、{% endif %}{% endfor %}
-          的岗位。可以减少条件再试。
+          {{ conditions | join(' 且 ') }} 的岗位。可以减少条件再试。
         </p>
         <div class="pager" style="margin-top:0">
           <a class="btn btn-ghost" href="{{ url_for('index', type=job_type) }}">清除筛选</a>

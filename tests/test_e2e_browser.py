@@ -97,6 +97,40 @@ class TestCheckboxFiltering:
         assert "type=fulltime" in page.url
 
 
+class TestSearch:
+    def test_type_and_enter_filters(self, session, live_server):
+        page = session.page
+        page.goto(f"{live_server}/?type=fulltime", wait_until="domcontentloaded")
+
+        page.fill('input[name="q"]', "岗位01")
+        page.press('input[name="q"]', "Enter")
+        page.wait_for_url(lambda url: "q=" in url, timeout=5000)
+
+        assert page.locator("a.card").count() == 1
+        assert page.input_value('input[name="q"]') == "岗位01"
+
+    def test_search_keeps_selected_city(self, session, live_server):
+        page = session.page
+        page.goto(f"{live_server}/?type=fulltime&city={BEIJING}", wait_until="domcontentloaded")
+
+        page.fill('input[name="q"]', "岗位")
+        page.press('input[name="q"]', "Enter")
+        page.wait_for_url(lambda url: "q=" in url, timeout=5000)
+
+        assert f"city={BEIJING}" in page.url
+        assert page.locator("a.card").count() > 0
+
+    def test_clear_keyword_keeps_city(self, session, live_server):
+        page = session.page
+        page.goto(f"{live_server}/?type=fulltime&city={BEIJING}&q=岗位01", wait_until="domcontentloaded")
+
+        page.click(".search-clear")
+        page.wait_for_url(lambda url: "q=" not in url, timeout=5000)
+
+        assert f"city={BEIJING}" in page.url
+        assert page.input_value('input[name="q"]') == ""
+
+
 class TestBackFromDetail:
     def test_back_keeps_filters_and_scroll(self, session, live_server):
         page = session.page

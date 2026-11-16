@@ -1,6 +1,7 @@
 """Web 层测试：列表、详情、可达性校验、空状态。"""
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 import pytest
@@ -131,10 +132,13 @@ class TestList:
         body = application.test_client().get("/?type=campus").get_data(as_text=True)
         assert "当前分类下没有岗位" in body
 
-    def test_no_search_box_enabled(self, seeded_client):
+    def test_search_box_is_enabled(self, seeded_client):
+        """M2 时这里断言的是「置灰 + P1 标记」，M4 按 T4.1 放开搜索，断言随之翻转。"""
         body = seeded_client.get("/").get_data(as_text=True)
-        assert "P1" in body
-        assert "disabled" in body
+        inputs = re.findall(r"<input[^>]*name=\"q\"[^>]*>", body)
+        assert len(inputs) == 1
+        assert "disabled" not in inputs[0]
+        assert "P1" not in body
 
 
 class TestDetail:

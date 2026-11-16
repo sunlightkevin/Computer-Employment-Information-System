@@ -19,6 +19,7 @@ CATEGORY_ORDER = ("intern", "campus", "fulltime")
 DEFAULT_CATEGORY = "intern"
 # 手改 URL 时允许一次勾很多，但别让查询无限膨胀
 MAX_FILTER_VALUES = 20
+MAX_KEYWORD_LEN = 50
 REMOTE_CITY = "远程"
 
 
@@ -50,20 +51,29 @@ def create_app(db_path: str | None = None) -> Flask:
 
         cities = _multi_arg("city")
         directions = _multi_arg("direction")
+        keyword = _keyword()
         page = _int_arg("page", 1)
 
         db = conn()
         library_total = read.total_jobs(db)
         counts = read.category_counts(db)
-        total = read.count_jobs(db, job_type=job_type, cities=cities, directions=directions)
+        total = read.count_jobs(db, job_type=job_type, cities=cities, directions=directions, keyword=keyword)
         pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         page = min(max(1, page), pages)
         jobs = read.list_jobs(
-            db, job_type=job_type, cities=cities, directions=directions, page=page, page_size=PAGE_SIZE
+            db,
+            job_type=job_type,
+            cities=cities,
+            directions=directions,
+            keyword=keyword,
+            page=page,
+            page_size=PAGE_SIZE,
         )
 
         # 当前筛选状态，拼链接时统一从这儿取，避免某个链接漏带条件
         filters = {"type": job_type, "city": cities, "direction": directions}
+        if keyword:
+            filters["q"] = keyword
 
         return render_template(
             "list.html",
@@ -80,9 +90,14 @@ def create_app(db_path: str | None = None) -> Flask:
             filters=filters,
             cities=cities,
             directions=directions,
-            filters_active=bool(cities or directions),
-            city_facets=read.facet_counts(db, "city", job_type=job_type, directions=directions),
-            direction_facets=read.facet_counts(db, "direction", job_type=job_type, cities=cities),
+            keyword=keyword,
+            filters_active=bool(cities or directions or keyword),
+            city_facets=read.facet_counts(
+                db, "city", job_type=job_type, directions=directions, keyword=keyword
+            ),
+            direction_facets=read.facet_counts(
+                db, "direction", job_type=job_type, cities=cities, keyword=keyword
+            ),
             remote_city=REMOTE_CITY,
         )
 
@@ -163,6 +178,11 @@ def _multi_arg(name: str) -> list[str]:
     return values[:MAX_FILTER_VALUES]
 
 
+def _keyword() -> str:
+    """搜索词。空串与纯空白都视为没有搜索。"""
+    return (request.args.get("q") or "").strip()[:MAX_KEYWORD_LEN]
+
+
 def _back_args() -> dict:
     """详情页返回列表时要带上的筛选状态。
 
@@ -175,10 +195,13 @@ def _back_args() -> dict:
     args: dict = {"type": job_type}
     cities = _multi_arg("city")
     directions = _multi_arg("direction")
+    keyword = _keyword()
     if cities:
         args["city"] = cities
     if directions:
         args["direction"] = directions
+    if keyword:
+        args["q"] = keyword
     page = _int_arg("page", 1)
     if page > 1:
         args["page"] = page

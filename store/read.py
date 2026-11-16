@@ -38,6 +38,15 @@ def _attach_multi(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dic
     return items
 
 
+def _like_pattern(keyword: str) -> str:
+    """把关键词转成 LIKE 模式。
+
+    必须转义 % 和 _，否则搜 `100%` 会变成「匹配任何内容」。
+    """
+    escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 def _where(job_type: str | None, cities: list[str], directions: list[str], keyword: str | None):
     clauses = ["j.status = 'active'"]
     params: list = []
@@ -61,10 +70,11 @@ def _where(job_type: str | None, cities: list[str], directions: list[str], keywo
         params.extend(directions)
 
     if keyword:
-        like = f"%{keyword}%"
+        like = _like_pattern(keyword)
         clauses.append(
-            "(j.title LIKE ? OR j.company LIKE ? "
-            "OR EXISTS (SELECT 1 FROM job_directions d2 WHERE d2.job_id = j.id AND d2.direction LIKE ?))"
+            "(j.title LIKE ? ESCAPE '\\' OR j.company LIKE ? ESCAPE '\\' "
+            "OR EXISTS (SELECT 1 FROM job_directions d2 "
+            "WHERE d2.job_id = j.id AND d2.direction LIKE ? ESCAPE '\\'))"
         )
         params.extend([like, like, like])
 
