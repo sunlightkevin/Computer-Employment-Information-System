@@ -14,8 +14,29 @@ from bs4 import BeautifulSoup
 from ..base import DetailData, ListRow
 
 BASE = "https://www.yingjiesheng.com"
-CATEGORY_PATH = "/major/jisuanji"  # 计算机电子分类
+CATEGORY_PATH = "/major/jisuanji"  # 专业分类（9 城市）
+MAJOR_PATH = "/zhuanye/jisuanji"   # 专业招聘（68 城市，含郑州）
 MAX_PAGES_PER_CITY = 3
+
+# /zhuanye/jisuanji/{city}/ 入口的规模（每页 50 行）。
+# 郑州在 /major/ 入口下没有独立 slug，只能从 /zhuanye/ 入口采集。
+ZHUANYE_CITY_PAGES = {
+    "zhengzhou": 3,
+}
+
+# 实测各城市末页（2026-11-17，见 docs/Spec/recon-yingjiesheng.md 的「规模实测」）。
+# 全量采集按这个上限翻页；站点扩页后 --all-pages 会按解析到的末页继续。
+CITY_TOTAL_PAGES = {
+    "beijing": 18,
+    "shanghai": 30,
+    "guangzhou": 14,
+    "shenzhen": 22,
+    "wuhan": 11,
+    "nanjing": 13,
+    "tianjin": 4,
+    "chengdu": 6,
+    "other": 30,
+}
 
 CITY_SLUGS = (
     "beijing",
@@ -30,6 +51,7 @@ CITY_SLUGS = (
 )
 
 DEFAULT_CITIES = ("beijing", "shanghai", "guangzhou", "shenzhen")
+ALL_CITIES = tuple(CITY_SLUGS)
 
 _LABEL_SUFFIX = re.compile(r"[:：]\s*$")
 
@@ -61,6 +83,33 @@ class YingjieshengAdapter:
                 urls.append(self.list_url(city, page))
                 remaining -= 1
         return urls
+
+    def list_all_pages(self, cities: list[str] | None = None) -> list[str]:
+        """全量翻页：每个城市翻到实测末页。
+
+        站点各城市页数不同（4～30 页），不能用统一上限。
+        """
+        cities = list(cities or ALL_CITIES)
+        urls: list[str] = []
+        for city in cities:
+            if city not in CITY_SLUGS:
+                raise ValueError(f"未知城市标识：{city}")
+            for page in range(1, CITY_TOTAL_PAGES[city] + 1):
+                urls.append(self.list_url(city, page))
+        return urls
+
+    def zhuanye_list_urls(self, city: str) -> list[str]:
+        """专业招聘入口的列表页（每页 50 行）。
+
+        该入口覆盖 68 个城市，含 /major/ 下没有独立 slug 的郑州。
+        """
+        if city not in ZHUANYE_CITY_PAGES:
+            raise ValueError(f"专业招聘入口未登记城市：{city}")
+        return [
+            f"{BASE}{MAJOR_PATH}/{city}/" if page == 1
+            else f"{BASE}{MAJOR_PATH}/{city}/list_{page}.html"
+            for page in range(1, ZHUANYE_CITY_PAGES[city] + 1)
+        ]
 
     def parse_list(self, html: str, base_url: str = BASE) -> list[ListRow]:
         soup = BeautifulSoup(html, "html.parser")

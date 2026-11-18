@@ -32,8 +32,14 @@ coverage/
 *.sqlite
 *.sqlite3
 *.db
+*.db.bak*
 data/local/
 uploads/
+
+# 采集运行产物
+tools/*.log
+tools/failed_lists.txt
+tools/zhengzhou_urls.json
 
 # 临时文件与系统噪音
 *.tmp

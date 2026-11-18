@@ -220,6 +220,7 @@ button { font-family: inherit; font-size: inherit; cursor: pointer; border: none
 .pager a:hover { background: var(--surface-2); }
 .pager .on { background: var(--black); color: #fff; font-weight: 600; }
 .pager .pg-disabled { color: var(--ink-4); opacity: .4; }
+.pager .pg-gap { border: 0; background: transparent; color: var(--ink-4); cursor: default; }
 
 /* ---------- empty ---------- */
 .empty { padding: 64px 24px; text-align: center; }

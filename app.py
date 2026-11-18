@@ -21,6 +21,8 @@ DEFAULT_CATEGORY = "intern"
 MAX_FILTER_VALUES = 20
 MAX_KEYWORD_LEN = 50
 REMOTE_CITY = "远程"
+# 侧栏城市前几位固定，郑州从 other 中独立出来，与一线城市并列（用户 2026-11-17 确认）
+PINNED_CITIES = ("北京", "上海", "广州", "深圳", "郑州")
 
 
 def create_app(db_path: str | None = None) -> Flask:
@@ -85,6 +87,7 @@ def create_app(db_path: str | None = None) -> Flask:
             total=total,
             page=page,
             pages=pages,
+            page_numbers=_page_numbers(page, pages),
             page_size=PAGE_SIZE,
             jobs=jobs,
             filters=filters,
@@ -93,7 +96,8 @@ def create_app(db_path: str | None = None) -> Flask:
             keyword=keyword,
             filters_active=bool(cities or directions or keyword),
             city_facets=read.facet_counts(
-                db, "city", job_type=job_type, directions=directions, keyword=keyword
+                db, "city", job_type=job_type, directions=directions, keyword=keyword,
+                pinned=list(PINNED_CITIES),
             ),
             direction_facets=read.facet_counts(
                 db, "direction", job_type=job_type, cities=cities, keyword=keyword
@@ -155,6 +159,29 @@ def create_app(db_path: str | None = None) -> Flask:
         return redirect(url_for("detail", job_id=job_id, unreachable=1, **_back_args()))
 
     return app
+
+
+def _page_numbers(current: int, total: int, radius: int = 2) -> list[int | None]:
+    """分页要显示的页码；None 代表省略号。
+
+    首尾页恒显示，当前页两侧各 radius 页，其余折叠。数据扩到上千条后
+    页码可能有上百个，全平铺会撑爆页面。
+    """
+    if total <= 7 + 2 * radius:
+        return list(range(1, total + 1))
+
+    keep = {1, total, current - radius, current - radius + 1, current, current + 1, current + radius}
+    keep = {p for p in keep if 1 <= p <= total}
+    ordered = sorted(keep)
+
+    result: list[int | None] = []
+    previous = 0
+    for number in ordered:
+        if previous and number - previous > 1:
+            result.append(None)
+        result.append(number)
+        previous = number
+    return result
 
 
 def _int_arg(name: str, default: int) -> int:

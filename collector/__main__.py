@@ -13,10 +13,11 @@ from dataclasses import dataclass, field
 from store import db as db_module
 from store import queries
 
-from .base import BrowserSession, BrowserUnavailable, FetchResult, RateLimiter
+from .base import BrowserSession, BrowserUnavailable, FetchResult, RateLimiter, is_waf_page
+from .normalize import build_dedupe_key
 from .pipeline import build_job, is_cs_job
 from .sources import get_adapter
-from .sources.yingjiesheng import DEFAULT_CITIES
+from .sources.yingjiesheng import ALL_CITIES, DEFAULT_CITIES
 
 
 @dataclass
@@ -49,7 +50,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=",".join(DEFAULT_CITIES),
         help=f"城市标识，逗号分隔，默认 {','.join(DEFAULT_CITIES)}",
     )
+    parser.add_argument(
+        "--all-pages",
+        action="store_true",
+        help="全量模式：忽略 --pages，按各城市实际末页翻完（9 城约 4300 条）",
+    )
+    parser.add_argument(
+        "--list-urls-file",
+        default=None,
+        help="从文件逐行读取列表页 URL（补采失败页用），忽略 --all-pages/--pages/--cities",
+    )
+    parser.add_argument(
+        "--zhuanye-city",
+        default=None,
+        help="专业招聘入口的城市 slug（如 zhengzhou，150 条 / 3 页），优先于其他入口参数",
+    )
+    parser.add_argument(
+        "--default-city",
+        default=None,
+        help="城市兜底：当详情城市为「其它」或空时填入（如郑州页面采来的岗位填郑州）",
+    )
     parser.add_argument("--limit", type=int, default=0, help="最多处理多少条详情，0 为不限")
+    parser.add_argument(
+        "--session-size",
+        type=int,
+        default=0,
+        help="每多少条详情重建一次浏览器会话，0 表示全程一个会话。站点触发 WAF 时建议 20",
+    )
     parser.add_argument("--delay", type=float, default=3.0, help="请求间隔秒，默认 3")
     parser.add_argument("--dry-run", action="store_true", help="只抓取与归一化，不写库")
     parser.add_argument(
@@ -61,11 +88,38 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _session_batches(rows: list, size: int):
+    """分批提供浏览器会话；每 size 条重建一次，避免同会话请求过多触发 WAF。"""
+    if size <= 0:
+        size = len(rows) or 1
+    for start in range(0, len(rows), size):
+        batch = list(enumerate(rows[start:start + size], start=start + 1))
+        with BrowserSession() as session:
+            yield session, batch
+
+
 def collect(args: argparse.Namespace) -> tuple[Stats, int]:
     stats = Stats()
     adapter = get_adapter(args.source)
     cities = [c.strip() for c in args.cities.split(",") if c.strip()]
-    list_urls = adapter.list_pages(cities, args.pages)
+    if args.zhuanye_city:
+        if not hasattr(adapter, "zhuanye_list_urls"):
+            print("该站点不支持专业招聘入口")
+            return stats, 1
+        list_urls = adapter.zhuanye_list_urls(args.zhuanye_city)
+    elif args.list_urls_file:
+        with open(args.list_urls_file, encoding="utf-8") as fh:
+            list_urls = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+    elif args.all_pages:
+        # 全量模式强制覆盖全部城市，忽略 --cities 默认只取 4 城的限制
+        if hasattr(adapter, "list_all_pages"):
+            cities = list(ALL_CITIES)
+            list_urls = adapter.list_all_pages(cities)
+        else:
+            print("该站点尚未实现全量翻页")
+            return stats, 1
+    else:
+        list_urls = adapter.list_pages(cities, args.pages)
 
     if not list_urls:
         print("没有可抓取的列表页，请检查 --pages 与 --cities")
@@ -81,10 +135,14 @@ def collect(args: argparse.Namespace) -> tuple[Stats, int]:
         for url in list_urls:
             limiter.wait()
             try:
-                result: FetchResult = session.get(url)
+                result: FetchResult = session.get_unblocked(url)
                 if result.status >= 400:
                     raise RuntimeError(f"HTTP {result.status}")
+                if is_waf_page(result.html):
+                    raise RuntimeError("验证页（重试后仍未恢复）")
                 page_rows = adapter.parse_list(result.html, result.url)
+                if not page_rows:
+                    raise RuntimeError("列表页无岗位行（疑似验证页）")
                 stats.pages_ok += 1
                 print(f"列表页 OK  {url}  ->  {len(page_rows)} 行")
             except Exception as exc:
@@ -112,20 +170,38 @@ def collect(args: argparse.Namespace) -> tuple[Stats, int]:
         conn = db_module.open_db()
 
     try:
-        with BrowserSession() as session:
-            for index, row in enumerate(rows, start=1):
+        for session, batch in _session_batches(rows, args.session_size):
+            for index, row in batch:
                 limiter.wait()
                 try:
-                    result = session.get(row.url)
+                    result = session.get_unblocked(row.url)
                     if result.status >= 400:
                         raise RuntimeError(f"HTTP {result.status}")
+                    if is_waf_page(result.html):
+                        raise RuntimeError("验证页（重试后仍未恢复）")
                     detail = adapter.parse_detail(result.html, row.url)
+                    if not detail.title and not detail.company:
+                        raise RuntimeError("详情页无岗位主体（疑似验证页）")
+                    # 详情正文必须抓到，否则 build_job 会用列表页标题兜底，
+                    # 生成没有摘要/投递方式的残缺记录，污染库
+                    if not detail.summary_raw and not detail.apply_info:
+                        raise RuntimeError("详情页无正文（疑似验证页）")
                     job = build_job(row, detail, adapter.name)
                     if job is None:
                         stats.skipped += 1
                         if args.verbose:
                             print(f"[{index}/{len(rows)}] 跳过（缺标题或企业） {row.url}")
                         continue
+
+                    # 城市兜底：站点详情页常把工作地点标成「其它」，
+                    # 但从城市专属页采来的岗位可用该城市补全
+                    if args.default_city:
+                        cities = [c for c in (job.get("cities") or []) if c not in ("其它", "未知", "")]
+                        if not cities:
+                            job["cities"] = [args.default_city]
+                            job["dedupe_key"] = build_dedupe_key(
+                                job.get("company"), job.get("title"), job["cities"]
+                            )
 
                     if not args.keep_other and not is_cs_job(job):
                         stats.skipped_non_cs += 1

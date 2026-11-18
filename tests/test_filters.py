@@ -252,7 +252,10 @@ class TestFacetCounts:
     def test_facet_counts_match_category(self, seeded_client):
         body = seeded_client.get("/?type=fulltime").get_data(as_text=True)
         assert 'value="深圳"' in body
-        assert 'value="北京"' not in body  # 北京没有就业类岗位
+        # 置顶城市即使在就业类下没有数据也要显示，数量为 0（郑州同理）
+        beijing = body.split('value="北京"')[1].split("</label>")[0]
+        assert 'class="opt-count">0<' in beijing
+        assert 'value="郑州"' in body
 
 
 class TestParamParsing:

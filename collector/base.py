@@ -138,6 +138,34 @@ class BrowserSession:
         status = response.status if response is not None else 0
         return FetchResult(status=status, url=self.page.url, html=self.page.content())
 
+    def get_unblocked(self, url: str, retries: int = 3, backoff: float = 15.0) -> FetchResult:
+        """取页面，遇到 WAF 滑块验证页时等待重试。
+
+        站点在批量请求后会短暂返回验证页（HTTP 200 但无岗位内容），
+        直接解析会得到只有标题的残缺记录。等待后通常自动恢复。
+        注意：同一会话反复请求可能一直命中验证页，调用方应配合
+        --session-size 定期重建会话。
+        """
+        result = self.get(url)
+        for attempt in range(retries):
+            if not is_waf_page(result.html):
+                return result
+            if attempt < retries - 1:
+                time.sleep(backoff)
+                result = self.get(url)
+        return result
+
+
+def is_waf_page(html: str) -> bool:
+    """判断是否为滑块验证页（HTTP 200，但只有验证脚本没有岗位内容）。"""
+    head = html[:3000]
+    return (
+        "为了更好的访问体验" in head
+        or "滑动验证" in head
+        or "CF_APP_WAF" in head
+        or "aliyun_waf" in head
+    )
+
 
 class SourceAdapter(Protocol):
     """站点适配器接口。站点改版时只改实现类。"""

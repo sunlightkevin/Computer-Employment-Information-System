@@ -180,6 +180,7 @@ def facet_counts(
     directions: list[str] | None = None,
     keyword: str | None = None,
     limit: int | None = None,
+    pinned: list[str] | None = None,
 ) -> list[dict]:
     """筛选区的可选值与数量。
 
@@ -202,10 +203,19 @@ def facet_counts(
         f"FROM {table} f JOIN jobs j ON j.id = f.job_id "
         f"WHERE {where} GROUP BY f.{column} ORDER BY count DESC, value"
     )
-    if limit:
-        sql += " LIMIT ?"
-        params = params + [int(limit)]
-    return [{"value": r["value"], "count": int(r["count"])} for r in conn.execute(sql, params)]
+    rows = [{"value": r["value"], "count": int(r["count"])} for r in conn.execute(sql, params)]
+
+    if not pinned:
+        return rows[:limit] if limit else rows
+
+    # 固定值排在最前（按给定顺序），即使当前分类下数量为 0 也要出现，
+    # 否则郑州这类小量城市会在别的分类里从筛选项中消失。
+    by_value = {r["value"]: r for r in rows}
+    result = [by_value.pop(value, {"value": value, "count": 0}) for value in pinned if value]
+    # 其余按数量倒序补齐；置顶值已从 by_value 移除，不会重复
+    rest = sorted(by_value.values(), key=lambda r: (-r["count"], r["value"]))
+    result.extend(rest)
+    return result[:limit] if limit else result
 
 
 def mark_source_reachability(conn: sqlite3.Connection, source_id: int, reachable: bool, checked_at: str) -> None:
