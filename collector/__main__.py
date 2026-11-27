@@ -84,6 +84,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="保留无法归入任何计算机方向的岗位（默认丢弃，保证采集范围为计算机/IT 类）",
     )
+    parser.add_argument(
+        "--keywords",
+        default=None,
+        help="51job 采集关键词，逗号分隔；不传则用内置 11 个词",
+    )
+    parser.add_argument(
+        "--job-area",
+        default="170000",
+        help="51job 地区代码，默认 170000（河南省）",
+    )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=0,
+        help="51job 每个关键词最多翻多少页，0 表示翻完；试跑可设 1",
+    )
+    parser.add_argument(
+        "--db-path",
+        default=None,
+        help="写入数据库路径，默认 data/jobs.db",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="打印每条处理结果")
     return parser
 
@@ -244,6 +265,40 @@ def collect(args: argparse.Namespace) -> tuple[Stats, int]:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # 51job 走专用流程：公开接口 JSON，无需详情页
+    if args.source == "51job":
+        from .job51_collect import collect_51job
+
+        keywords = [k.strip() for k in args.keywords.split(",") if k.strip()] if args.keywords else None
+        try:
+            stats = collect_51job(
+                keywords=keywords,
+                job_area=args.job_area,
+                delay=args.delay,
+                limit_pages_per_keyword=args.max_pages,
+                dry_run=args.dry_run,
+                db_path=args.db_path,
+                verbose=args.verbose,
+            )
+        except BrowserUnavailable as exc:
+            print(f"浏览器不可用：{exc}")
+            return 1
+        except KeyboardInterrupt:
+            print("已中断")
+            return 130
+        except Exception:
+            traceback.print_exc()
+            return 1
+
+        print("-" * 50)
+        print(stats.summary())
+        if stats.errors:
+            print(f"错误明细（前 10 条，共 {len(stats.errors)}）：")
+            for line in stats.errors[:10]:
+                print("  - " + line)
+        return 0
+
     try:
         stats, code = collect(args)
     except BrowserUnavailable as exc:
